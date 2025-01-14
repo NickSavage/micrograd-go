@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 )
 
 type Value struct {
@@ -57,4 +58,24 @@ func Add(a, b *Value) *Value {
 
 func Mul(a, b *Value) *Value {
 	return &Value{Data: a.Data * b.Data, Grad: 0.0, Children: []*Value{a, b}, Op: "*"}
+}
+
+func Tanh(a *Value) *Value {
+	return &Value{Data: math.Tanh(a.Data), Grad: 0.0, Children: []*Value{a}, Op: "tanh"}
+}
+
+func (v *Value) Backward() {
+	switch v.Op {
+	case "+":
+		v.Children[0].Grad = v.Grad
+		v.Children[1].Grad = v.Grad
+	case "*":
+		v.Children[0].Grad = v.Grad * v.Children[1].Data
+		v.Children[1].Grad = v.Grad * v.Children[0].Data
+	case "tanh":
+		v.Children[0].Grad = v.Grad * (1 - math.Pow(v.Data, 2))
+	}
+	for _, child := range v.Children {
+		child.Backward()
+	}
 }
