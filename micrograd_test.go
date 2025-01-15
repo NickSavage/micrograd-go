@@ -186,7 +186,7 @@ func TestGradSameComponent(t *testing.T) {
 func TestNeuron(t *testing.T) {
 	neuron := NewNeuron(2)
 	neuron.Print()
-	if len(neuron.W) != 3 {
+	if len(neuron.W) != 2 {
 		t.Errorf("Expected 2 weights, got %d", len(neuron.W))
 	}
 	if neuron.B == nil {

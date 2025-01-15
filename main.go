@@ -1,9 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"math/rand/v2"
+	"os"
 )
 
 type Value struct {
@@ -25,6 +28,15 @@ type Layer struct {
 
 type MLP struct {
 	Layers []*Layer
+}
+
+type MLPState struct {
+	NumInputs   int   `json:"num_inputs"`
+	LayerSizes  []int `json:"layer_sizes"`
+	LayerStates [][]struct {
+		Weights []float64 `json:"weights"`
+		Bias    float64   `json:"bias"`
+	} `json:"layer_states"`
 }
 
 func NewNeuron(numInputs int) *Neuron {
@@ -52,21 +64,17 @@ func (n *Neuron) Print() {
 	fmt.Printf("Neuron(W: %v, B: %v)\n", n.W, n.B)
 }
 
-func (n *Neuron) callValue(x []*Value) *Value {
-	sum := n.B.Data
+func (n *Neuron) Call(x []*Value) *Value {
+	sum := n.B
 	for i, w := range n.W {
-		sum += w.Data * x[i].Data
+		sum = Add(sum, Mul(w, x[i]))
 	}
-	out := Tanh(&Value{Data: sum, Grad: 0.0, Children: nil, Op: "", Label: "sum"})
+	out := Tanh(sum)
 	return out
 }
 
-func (n *Neuron) Call(x []float64) float64 {
-	values := make([]*Value, len(x))
-	for i, v := range x {
-		values[i] = &Value{Data: v, Grad: 0.0, Children: nil, Op: "", Label: fmt.Sprintf("x%d", i)}
-	}
-	return n.callValue(values).Data
+func (n *Neuron) Parameters() []*Value {
+	return append(n.W, n.B)
 }
 
 func NewLayer(numInputs, numOutputs int) *Layer {
@@ -83,25 +91,20 @@ func (l *Layer) Print() {
 	}
 }
 
-func (l *Layer) callValue(x []*Value) []*Value {
+func (l *Layer) Call(x []*Value) []*Value {
 	outputs := make([]*Value, len(l.Neurons))
 	for i, neuron := range l.Neurons {
-		outputs[i] = neuron.callValue(x)
+		outputs[i] = neuron.Call(x)
 	}
 	return outputs
 }
 
-func (l *Layer) Call(x []float64) []float64 {
-	values := make([]*Value, len(x))
-	for i, v := range x {
-		values[i] = &Value{Data: v, Grad: 0.0, Children: nil, Op: "", Label: fmt.Sprintf("x%d", i)}
+func (l *Layer) Parameters() []*Value {
+	params := []*Value{}
+	for _, neuron := range l.Neurons {
+		params = append(params, neuron.Parameters()...)
 	}
-	outputs := l.callValue(values)
-	result := make([]float64, len(outputs))
-	for i, v := range outputs {
-		result[i] = v.Data
-	}
-	return result
+	return params
 }
 
 func NewMLP(numInputs int, layerSizes []int) *MLP {
@@ -124,24 +127,19 @@ func (m *MLP) Print() {
 	}
 }
 
-func (m *MLP) callValue(x []*Value) []*Value {
+func (m *MLP) Call(x []*Value) []*Value {
 	for _, layer := range m.Layers {
-		x = layer.callValue(x)
+		x = layer.Call(x)
 	}
 	return x
 }
 
-func (m *MLP) Call(x []float64) []float64 {
-	values := make([]*Value, len(x))
-	for i, v := range x {
-		values[i] = &Value{Data: v, Grad: 0.0, Children: nil, Op: "", Label: fmt.Sprintf("x%d", i)}
+func (m *MLP) Parameters() []*Value {
+	params := []*Value{}
+	for _, layer := range m.Layers {
+		params = append(params, layer.Parameters()...)
 	}
-	outputs := m.callValue(values)
-	result := make([]float64, len(outputs))
-	for i, v := range outputs {
-		result[i] = v.Data
-	}
-	return result
+	return params
 }
 
 func (v *Value) PrintGraph(prefix string, isLast bool) {
@@ -235,8 +233,133 @@ func (v *Value) Backward() {
 	}
 }
 
+func (m *MLP) Save(filename string) error {
+	// Create state object
+	state := MLPState{
+		LayerSizes: make([]int, len(m.Layers)),
+		LayerStates: make([][]struct {
+			Weights []float64 `json:"weights"`
+			Bias    float64   `json:"bias"`
+		}, len(m.Layers)),
+	}
+
+	// Get number of inputs from first layer's first neuron
+	if len(m.Layers) > 0 && len(m.Layers[0].Neurons) > 0 {
+		state.NumInputs = len(m.Layers[0].Neurons[0].W)
+	}
+
+	// Save each layer's state
+	for i, layer := range m.Layers {
+		state.LayerSizes[i] = len(layer.Neurons)
+		state.LayerStates[i] = make([]struct {
+			Weights []float64 `json:"weights"`
+			Bias    float64   `json:"bias"`
+		}, len(layer.Neurons))
+
+		for j, neuron := range layer.Neurons {
+			weights := make([]float64, len(neuron.W))
+			for k, w := range neuron.W {
+				weights[k] = w.Data
+			}
+			state.LayerStates[i][j] = struct {
+				Weights []float64 `json:"weights"`
+				Bias    float64   `json:"bias"`
+			}{
+				Weights: weights,
+				Bias:    neuron.B.Data,
+			}
+		}
+	}
+
+	// Marshal to JSON
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return fmt.Errorf("error marshaling model state: %v", err)
+	}
+
+	// Write to file
+	err = os.WriteFile(filename, data, 0644)
+	if err != nil {
+		return fmt.Errorf("error writing model state: %v", err)
+	}
+
+	return nil
+}
+
+func LoadMLP(filename string) (*MLP, error) {
+	// Read file
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, fmt.Errorf("error reading model state: %v", err)
+	}
+
+	// Unmarshal JSON
+	var state MLPState
+	err = json.Unmarshal(data, &state)
+	if err != nil {
+		return nil, fmt.Errorf("error unmarshaling model state: %v", err)
+	}
+
+	// Create new MLP
+	mlp := NewMLP(state.NumInputs, state.LayerSizes)
+
+	// Load weights and biases
+	for i, layer := range mlp.Layers {
+		for j, neuron := range layer.Neurons {
+			for k, w := range neuron.W {
+				w.Data = state.LayerStates[i][j].Weights[k]
+			}
+			neuron.B.Data = state.LayerStates[i][j].Bias
+		}
+	}
+
+	return mlp, nil
+}
+
+func Run(m *MLP, inputs [][]float64, targets []float64) {
+	outputs := []*Value{}
+	for i, input := range inputs {
+		// Convert input to Values
+		inputValues := make([]*Value, len(input))
+		for j, v := range input {
+			inputValues[j] = &Value{Data: v, Grad: 0.0, Children: nil, Op: "", Label: fmt.Sprintf("x%d", j)}
+		}
+
+		output := m.Call(inputValues)
+		fmt.Printf("Input %d: %v -> Output: %v\n", i+1, input, output)
+		outputs = append(outputs, output[0])
+	}
+	loss := &Value{}
+	for i, output := range outputs {
+		fmt.Printf("Output %d: %v\n", i+1, output)
+		targetValue := &Value{Data: targets[i], Grad: 0.0, Children: nil, Op: "", Label: "target"}
+		diff := Add(output, &Value{Data: -targetValue.Data, Grad: 0.0})
+		result := Mul(diff, diff)
+		loss = Add(loss, result)
+	}
+	fmt.Printf("Loss: %v\n", loss.Data)
+	loss.Backward()
+	log.Printf("%v", m.Layers[0].Neurons[0].W[0])
+	// log.Printf("%v", m.Parameters())
+	for _, param := range m.Parameters() {
+		log.Printf("%v", param)
+		param.Data -= param.Grad * 0.01
+	}
+}
+
 func main() {
-	m := NewMLP(3, []int{3, 4, 4, 1})
+	var m *MLP
+	if _, err := os.Stat("model.json"); os.IsNotExist(err) {
+		// Create new model if file doesn't exist
+		m = NewMLP(3, []int{3, 4, 4, 1})
+	} else {
+		// Load existing model
+		var err error
+		m, err = LoadMLP("model.json")
+		if err != nil {
+			log.Fatalf("Failed to load model: %v", err)
+		}
+	}
 
 	inputs := [][]float64{
 		{2.0, 3.0, -1.0},
@@ -244,11 +367,19 @@ func main() {
 		{0.5, 1.0, 1.0},
 		{1.0, 1.0, -1.0},
 	}
-	//targets := []float64{1.0, -1.0, -1.0, 1.0}
-
-	fmt.Println("Processing inputs:")
-	for i, input := range inputs {
-		output := m.Call(input)
-		fmt.Printf("Input %d: %v -> Output: %v\n", i+1, input, output)
+	targets := []float64{1.0, -1.0, -1.0, 1.0}
+	for i := 0; i < 100; i++ {
+		Run(m, inputs, targets)
 	}
+
+	testInputs := [][]float64{
+		{0.5, 1.0, 1.0},
+	}
+	testInputValues := make([]*Value, len(testInputs[0]))
+	for j, v := range testInputs[0] {
+		testInputValues[j] = &Value{Data: v}
+	}
+	output := m.Call(testInputValues)
+	fmt.Printf("Test output: %v\n", output)
+	m.Save("model.json")
 }
