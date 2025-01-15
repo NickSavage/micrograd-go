@@ -344,6 +344,7 @@ func Run(m *MLP, inputs [][]float64, targets []float64) {
 	for _, param := range m.Parameters() {
 		log.Printf("%v", param)
 		param.Data -= param.Grad * 0.01
+		param.Grad = 0.0
 	}
 }
 
@@ -351,7 +352,7 @@ func main() {
 	var m *MLP
 	if _, err := os.Stat("model.json"); os.IsNotExist(err) {
 		// Create new model if file doesn't exist
-		m = NewMLP(3, []int{3, 4, 4, 1})
+		m = NewMLP(1, []int{3, 4, 4, 1})
 	} else {
 		// Load existing model
 		var err error
@@ -361,25 +362,45 @@ func main() {
 		}
 	}
 
+	// Normalize inputs to a smaller range
 	inputs := [][]float64{
-		{2.0, 3.0, -1.0},
-		{3.0, -1.0, 0.5},
-		{0.5, 1.0, 1.0},
-		{1.0, 1.0, -1.0},
+		{0.75},  // 75/100
+		{0.25},  // 25/100
+		{1.0},   // 100/100
+		{0.1},   // 10/100
+		{0.505}, // 50.5/100
+		{0.495}, // 49.5/100
+		{0.8},   // 80/100
+		{0.3},   // 30/100
 	}
-	targets := []float64{1.0, -1.0, -1.0, 1.0}
+
+	targets := []float64{1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0}
+
+	// Increase training iterations and add logging
 	for i := 0; i < 100; i++ {
 		Run(m, inputs, targets)
 	}
 
+	// Test with normalized inputs
 	testInputs := [][]float64{
-		{0.5, 1.0, 1.0},
+		{0.6}, // 60/100
+		{0.4}, // 40/100
+		{0.1}, // 10/100
+		{0.9}, // 90/100
 	}
-	testInputValues := make([]*Value, len(testInputs[0]))
-	for j, v := range testInputs[0] {
-		testInputValues[j] = &Value{Data: v}
+
+	// Test each input
+	for _, testInput := range testInputs {
+		testInputValues := make([]*Value, len(testInput))
+		for j, v := range testInput {
+			testInputValues[j] = &Value{Data: v}
+		}
+		output := m.Call(testInputValues)
+		fmt.Printf("Input: %.1f, Output: %v (Expected: %v)\n",
+			testInput[0]*100, // Denormalize for display
+			output,
+			map[bool]string{true: "> 50", false: "<= 50"}[testInput[0]*100 > 50])
 	}
-	output := m.Call(testInputValues)
-	fmt.Printf("Test output: %v\n", output)
+
 	m.Save("model.json")
 }
