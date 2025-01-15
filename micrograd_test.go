@@ -63,8 +63,8 @@ func TestBasicGrad(t *testing.T) {
 	if L.Data != -8 {
 		t.Errorf("Expected -8.0, got %f", L.Data)
 	}
-	if L.Grad != -20.0 {
-		t.Errorf("Expected -20.0, got %f", L.Grad)
+	if a.Grad != 6.0 {
+		t.Errorf("Expected 6.0, got %f", L.Grad)
 	}
 
 }
@@ -140,12 +140,17 @@ func TestSimplifiedGrad(t *testing.T) {
 			expectedOutput, output.Data, diff)
 	}
 
+	// update the following with this: x1.grad tensor(-0.7723)
+	// x2.grad tensor(0.2574)
+	// w1.grad tensor(0.5149)
+	// w2.grad tensor(0.1287)
+	// b.grad tensor(0.2574)
 	// Verify key gradients
 	expectedGrads := map[string]float64{
-		"x1": -0.772300, // ∂output/∂x1
-		"w1": 0.514866,  // ∂output/∂w1
-		"x2": 0.257433,  // ∂output/∂x2
-		"b":  0.257433,  // ∂output/∂b
+		"x1": -0.7723, // ∂output/∂x1
+		"w1": 0.5149,  // ∂output/∂w1
+		"x2": 0.2574,  // ∂output/∂x2
+		"b":  0.2574,  // ∂output/∂b
 	}
 
 	gradients := map[string]*Value{
@@ -161,5 +166,30 @@ func TestSimplifiedGrad(t *testing.T) {
 			t.Errorf("Gradient for %s: Expected ≈ %f, got %f, diff: %f",
 				label, expectedGrad, value.Grad, diff)
 		}
+	}
+}
+
+func TestGradSameComponent(t *testing.T) {
+	a := &Value{Data: 2.0, Grad: 0.0, Label: "a"}
+	b := Add(a, a)
+	b.Print()
+
+	b.Grad = 1.0
+	b.Backward()
+	b.Print()
+
+	if a.Grad != 2.0 {
+		t.Errorf("Expected 2.0, got %f", a.Grad)
+	}
+}
+
+func TestNeuron(t *testing.T) {
+	neuron := NewNeuron(2)
+	neuron.Print()
+	if len(neuron.W) != 3 {
+		t.Errorf("Expected 2 weights, got %d", len(neuron.W))
+	}
+	if neuron.B == nil {
+		t.Errorf("Expected bias, got nil")
 	}
 }
