@@ -1,236 +1,48 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
-	"math"
 	"os"
+
+	"github.com/NickSavage/micrograd-go/nn"
 )
 
-type Value struct {
-	Data     float64
-	Grad     float64
-	Children []*Value
-	Op       string
-	Label    string
-}
-
-func (v *Value) PrintGraph(prefix string, isLast bool) {
-	// First line prefix
-	firstPrefix := prefix
-	if isLast {
-		firstPrefix += "└── "
-	} else {
-		firstPrefix += "├── "
-	}
-
-	// Child prefix
-	childPrefix := prefix
-	if isLast {
-		childPrefix += "    "
-	} else {
-		childPrefix += "│   "
-	}
-
-	// Print current node
-	opStr := ""
-	if v.Op != "" {
-		opStr = fmt.Sprintf(" (%s)", v.Op)
-	}
-	fmt.Printf("%sValue(%s: %.4f, grad=%.4f)%s\n", firstPrefix, v.Label, v.Data, v.Grad, opStr)
-
-	// Print children
-	for i, child := range v.Children {
-		isLastChild := i == len(v.Children)-1
-		child.PrintGraph(childPrefix, isLastChild)
-	}
-}
-
-func (v *Value) Print() {
-	v.PrintGraph("", true)
-}
-
-func (v *Value) String() string {
-	return fmt.Sprintf("Value(Data: %v, Grad: %v)", v.Data, v.Grad)
-}
-
-func Add(a, b *Value) *Value {
-	return &Value{Data: a.Data + b.Data, Grad: 0.0, Children: []*Value{a, b}, Op: "+"}
-}
-
-func Mul(a, b *Value) *Value {
-	return &Value{Data: a.Data * b.Data, Grad: 0.0, Children: []*Value{a, b}, Op: "*"}
-}
-
-func Tanh(a *Value) *Value {
-	return &Value{Data: math.Tanh(a.Data), Grad: 0.0, Children: []*Value{a}, Op: "tanh"}
-}
-
-func (v *Value) backward() {
-	switch v.Op {
-	case "+":
-		v.Children[0].Grad += v.Grad
-		v.Children[1].Grad += v.Grad
-	case "*":
-		v.Children[0].Grad += v.Grad * v.Children[1].Data
-		v.Children[1].Grad += v.Grad * v.Children[0].Data
-	case "tanh":
-		v.Children[0].Grad += v.Grad * (1 - math.Pow(v.Data, 2))
-	}
-}
-
-func (v *Value) Backward() {
-	// Build nodes in topological order
-	var topo []*Value
-	visited := make(map[*Value]bool)
-
-	var buildTopo func(v *Value)
-	buildTopo = func(v *Value) {
-		if visited[v] {
-			return
-		}
-		visited[v] = true
-		for _, child := range v.Children {
-			buildTopo(child)
-		}
-		topo = append(topo, v)
-	}
-	buildTopo(v)
-
-	// Initialize gradient of root to 1.0
-	v.Grad = 1.0
-
-	// Backpropagate in reverse topological order
-	for i := len(topo) - 1; i >= 0; i-- {
-		topo[i].backward()
-	}
-}
-
-func (m *MLP) Save(filename string) error {
-	// Create state object
-	state := MLPState{
-		LayerSizes: make([]int, len(m.Layers)),
-		LayerStates: make([][]struct {
-			Weights []float64 `json:"weights"`
-			Bias    float64   `json:"bias"`
-		}, len(m.Layers)),
-	}
-
-	// Get number of inputs from first layer's first neuron
-	if len(m.Layers) > 0 && len(m.Layers[0].Neurons) > 0 {
-		state.NumInputs = len(m.Layers[0].Neurons[0].W)
-	}
-
-	// Save each layer's state
-	for i, layer := range m.Layers {
-		state.LayerSizes[i] = len(layer.Neurons)
-		state.LayerStates[i] = make([]struct {
-			Weights []float64 `json:"weights"`
-			Bias    float64   `json:"bias"`
-		}, len(layer.Neurons))
-
-		for j, neuron := range layer.Neurons {
-			weights := make([]float64, len(neuron.W))
-			for k, w := range neuron.W {
-				weights[k] = w.Data
-			}
-			state.LayerStates[i][j] = struct {
-				Weights []float64 `json:"weights"`
-				Bias    float64   `json:"bias"`
-			}{
-				Weights: weights,
-				Bias:    neuron.B.Data,
-			}
-		}
-	}
-
-	// Marshal to JSON
-	data, err := json.MarshalIndent(state, "", "  ")
-	if err != nil {
-		return fmt.Errorf("error marshaling model state: %v", err)
-	}
-
-	// Write to file
-	err = os.WriteFile(filename, data, 0644)
-	if err != nil {
-		return fmt.Errorf("error writing model state: %v", err)
-	}
-
-	return nil
-}
-
-func LoadMLP(filename string) (*MLP, error) {
-	// Read file
-	data, err := os.ReadFile(filename)
-	if err != nil {
-		return nil, fmt.Errorf("error reading model state: %v", err)
-	}
-
-	// Unmarshal JSON
-	var state MLPState
-	err = json.Unmarshal(data, &state)
-	if err != nil {
-		return nil, fmt.Errorf("error unmarshaling model state: %v", err)
-	}
-
-	// Create new MLP
-	mlp := NewMLP(state.NumInputs, state.LayerSizes)
-
-	// Load weights and biases
-	for i, layer := range mlp.Layers {
-		for j, neuron := range layer.Neurons {
-			for k, w := range neuron.W {
-				w.Data = state.LayerStates[i][j].Weights[k]
-			}
-			neuron.B.Data = state.LayerStates[i][j].Bias
-		}
-	}
-
-	return mlp, nil
-}
-
-func Run(m *MLP, inputs [][]float64, targets []float64) {
-	outputs := []*Value{}
-	for i, input := range inputs {
-		// Convert input to Values
-		inputValues := make([]*Value, len(input))
+func Run(m *nn.MLP, inputs [][]float64, targets []float64) {
+	outputs := []*nn.Value{}
+	for _, input := range inputs {
+		inputValues := make([]*nn.Value, len(input))
 		for j, v := range input {
-			inputValues[j] = &Value{Data: v, Grad: 0.0, Children: nil, Op: "", Label: fmt.Sprintf("x%d", j)}
+			inputValues[j] = &nn.Value{Data: v, Grad: 0.0, Children: nil, Op: "", Label: fmt.Sprintf("x%d", j)}
 		}
 
 		output := m.Call(inputValues)
-		fmt.Printf("Input %d: %v -> Output: %v\n", i+1, input, output)
 		outputs = append(outputs, output[0])
 	}
-	loss := &Value{}
+	loss := &nn.Value{}
 	for i, output := range outputs {
-		fmt.Printf("Output %d: %v\n", i+1, output)
-		targetValue := &Value{Data: targets[i], Grad: 0.0, Children: nil, Op: "", Label: "target"}
-		diff := Add(output, &Value{Data: -targetValue.Data, Grad: 0.0})
-		result := Mul(diff, diff)
-		loss = Add(loss, result)
+		targetValue := &nn.Value{Data: targets[i], Grad: 0.0, Children: nil, Op: "", Label: "target"}
+		diff := nn.Add(output, &nn.Value{Data: -targetValue.Data, Grad: 0.0})
+		result := nn.Mul(diff, diff)
+		loss = nn.Add(loss, result)
 	}
-	fmt.Printf("Loss: %v\n", loss.Data)
 	loss.Backward()
-	log.Printf("%v", m.Layers[0].Neurons[0].W[0])
-	// log.Printf("%v", m.Parameters())
+
 	for _, param := range m.Parameters() {
-		log.Printf("%v", param)
 		param.Data -= param.Grad * 0.01
 		param.Grad = 0.0
 	}
 }
 
 func main() {
-	var m *MLP
+	var m *nn.MLP
 	if _, err := os.Stat("model.json"); os.IsNotExist(err) {
 		// Create new model if file doesn't exist
-		m = NewMLP(1, []int{3, 4, 4, 1})
+		m = nn.NewMLP(1, []int{3, 4, 4, 1})
 	} else {
 		// Load existing model
 		var err error
-		m, err = LoadMLP("model.json")
+		m, err = nn.LoadMLP("model.json")
 		if err != nil {
 			log.Fatalf("Failed to load model: %v", err)
 		}
@@ -265,9 +77,9 @@ func main() {
 
 	// Test each input
 	for _, testInput := range testInputs {
-		testInputValues := make([]*Value, len(testInput))
+		testInputValues := make([]*nn.Value, len(testInput))
 		for j, v := range testInput {
-			testInputValues[j] = &Value{Data: v}
+			testInputValues[j] = &nn.Value{Data: v}
 		}
 		output := m.Call(testInputValues)
 		fmt.Printf("Input: %.1f, Output: %v (Expected: %v)\n",

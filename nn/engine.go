@@ -1,8 +1,10 @@
-package main
+package nn
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand/v2"
+	"os"
 )
 
 type Neuron struct {
@@ -128,4 +130,87 @@ func (m *MLP) Parameters() []*Value {
 		params = append(params, layer.Parameters()...)
 	}
 	return params
+}
+
+func (m *MLP) Save(filename string) error {
+	// Create state object
+	state := MLPState{
+		LayerSizes: make([]int, len(m.Layers)),
+		LayerStates: make([][]struct {
+			Weights []float64 `json:"weights"`
+			Bias    float64   `json:"bias"`
+		}, len(m.Layers)),
+	}
+
+	// Get number of inputs from first layer's first neuron
+	if len(m.Layers) > 0 && len(m.Layers[0].Neurons) > 0 {
+		state.NumInputs = len(m.Layers[0].Neurons[0].W)
+	}
+
+	// Save each layer's state
+	for i, layer := range m.Layers {
+		state.LayerSizes[i] = len(layer.Neurons)
+		state.LayerStates[i] = make([]struct {
+			Weights []float64 `json:"weights"`
+			Bias    float64   `json:"bias"`
+		}, len(layer.Neurons))
+
+		for j, neuron := range layer.Neurons {
+			weights := make([]float64, len(neuron.W))
+			for k, w := range neuron.W {
+				weights[k] = w.Data
+			}
+			state.LayerStates[i][j] = struct {
+				Weights []float64 `json:"weights"`
+				Bias    float64   `json:"bias"`
+			}{
+				Weights: weights,
+				Bias:    neuron.B.Data,
+			}
+		}
+	}
+
+	// Marshal to JSON
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return fmt.Errorf("error marshaling model state: %v", err)
+	}
+
+	// Write to file
+	err = os.WriteFile(filename, data, 0644)
+	if err != nil {
+		return fmt.Errorf("error writing model state: %v", err)
+	}
+
+	return nil
+}
+
+func LoadMLP(filename string) (*MLP, error) {
+	// Read file
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, fmt.Errorf("error reading model state: %v", err)
+	}
+
+	// Unmarshal JSON
+	var state MLPState
+	err = json.Unmarshal(data, &state)
+	if err != nil {
+		return nil, fmt.Errorf("error unmarshaling model state: %v", err)
+	}
+
+	// Create new MLP
+	mlp := NewMLP(state.NumInputs, state.LayerSizes)
+
+	// Load weights and biases
+	for i, layer := range mlp.Layers {
+		for j, neuron := range layer.Neurons {
+			for k, w := range neuron.W {
+				w.Data = state.LayerStates[i][j].Weights[k]
+			}
+			neuron.B.Data = state.LayerStates[i][j].Bias
+		}
+	}
+
+	return mlp, nil
 }

@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"math"
 	"testing"
+
+	"github.com/NickSavage/micrograd-go/nn"
 )
 
 func TestBasicAdd(t *testing.T) {
-	a := &Value{Data: 1.0, Grad: 0.0}
-	b := &Value{Data: 2.0, Grad: 0.0}
-	c := Add(a, b)
+	a := &nn.Value{Data: 1.0, Grad: 0.0}
+	b := &nn.Value{Data: 2.0, Grad: 0.0}
+	c := nn.Add(a, b)
 
 	fmt.Println(c.Data)
 	if c.Data != 3.0 {
@@ -18,9 +20,9 @@ func TestBasicAdd(t *testing.T) {
 }
 
 func TestBasicMul(t *testing.T) {
-	a := &Value{Data: 2.0, Grad: 0.0}
-	b := &Value{Data: 3.0, Grad: 0.0}
-	c := Mul(a, b)
+	a := &nn.Value{Data: 2.0, Grad: 0.0}
+	b := &nn.Value{Data: 3.0, Grad: 0.0}
+	c := nn.Mul(a, b)
 
 	fmt.Println(c.Data)
 	if c.Data != 6.0 {
@@ -29,11 +31,11 @@ func TestBasicMul(t *testing.T) {
 }
 
 func TestBasicMulAdd(t *testing.T) {
-	a := &Value{Data: 2.0, Grad: 0.0, Label: "a"}
-	b := &Value{Data: 3.0, Grad: 0.0, Label: "b"}
-	c := Mul(a, b)
+	a := &nn.Value{Data: 2.0, Grad: 0.0, Label: "a"}
+	b := &nn.Value{Data: 3.0, Grad: 0.0, Label: "b"}
+	c := nn.Mul(a, b)
 	c.Label = "c"
-	d := Add(c, a)
+	d := nn.Add(c, a)
 	d.Label = "d"
 	d.Print()
 	if d.Data != 8.0 {
@@ -43,18 +45,18 @@ func TestBasicMulAdd(t *testing.T) {
 
 func TestBasicGrad(t *testing.T) {
 
-	a := &Value{Data: 2.0, Grad: 0.0, Label: "a"}
-	b := &Value{Data: -3.0, Grad: 0.0, Label: "b"}
-	c := &Value{Data: 10.0, Grad: 0.0, Label: "c"}
+	a := &nn.Value{Data: 2.0, Grad: 0.0, Label: "a"}
+	b := &nn.Value{Data: -3.0, Grad: 0.0, Label: "b"}
+	c := &nn.Value{Data: 10.0, Grad: 0.0, Label: "c"}
 
-	e := Mul(a, b)
+	e := nn.Mul(a, b)
 	e.Label = "e"
 
-	d := Add(e, c)
+	d := nn.Add(e, c)
 	d.Label = "d"
 
-	f := &Value{Data: -2.0, Grad: 0.0, Label: "f"}
-	L := Mul(d, f)
+	f := &nn.Value{Data: -2.0, Grad: 0.0, Label: "f"}
+	L := nn.Mul(d, f)
 	L.Label = "L"
 	L.Grad = 1.0
 	L.Backward()
@@ -72,8 +74,8 @@ func TestBasicGrad(t *testing.T) {
 func TestTanh(t *testing.T) {
 	const epsilon = 1e-6
 
-	a := &Value{Data: 1.0, Grad: 0.0}
-	b := Tanh(a)
+	a := &nn.Value{Data: 1.0, Grad: 0.0}
+	b := nn.Tanh(a)
 	b.Print()
 
 	if diff := math.Abs(b.Data - math.Tanh(1.0)); diff > epsilon {
@@ -92,31 +94,31 @@ func TestTanh(t *testing.T) {
 
 func TestSimplifiedGrad(t *testing.T) {
 	// Create input values
-	x1 := &Value{Data: 2.0, Grad: 0.0, Label: "x1"}
-	x2 := &Value{Data: 0.5, Grad: 0.0, Label: "x2"}
+	x1 := &nn.Value{Data: 2.0, Grad: 0.0, Label: "x1"}
+	x2 := &nn.Value{Data: 0.5, Grad: 0.0, Label: "x2"}
 
 	// Create weights
-	w1 := &Value{Data: -3.0, Grad: 0.0, Label: "w1"}
-	w2 := &Value{Data: 1.0, Grad: 0.0, Label: "w2"}
+	w1 := &nn.Value{Data: -3.0, Grad: 0.0, Label: "w1"}
+	w2 := &nn.Value{Data: 1.0, Grad: 0.0, Label: "w2"}
 
 	// Create bias
-	b := &Value{Data: 6.8, Grad: 0.0, Label: "b"}
+	b := &nn.Value{Data: 6.8, Grad: 0.0, Label: "b"}
 
 	// Forward pass - computing: tanh(x1*w1 + x2*w2 + b)
-	mul1 := Mul(x1, w1)
+	mul1 := nn.Mul(x1, w1)
 	mul1.Label = "x1*w1"
 
-	mul2 := Mul(x2, w2)
+	mul2 := nn.Mul(x2, w2)
 	mul2.Label = "x2*w2"
 
-	add1 := Add(mul1, mul2)
+	add1 := nn.Add(mul1, mul2)
 	add1.Label = "sum"
 
-	add2 := Add(add1, b)
+	add2 := nn.Add(add1, b)
 	add2.Label = "pre_act"
 
 	// Final output with activation
-	output := Tanh(add2)
+	output := nn.Tanh(add2)
 	output.Label = "output"
 
 	// Print forward pass result
@@ -153,7 +155,7 @@ func TestSimplifiedGrad(t *testing.T) {
 		"b":  0.2574,  // ∂output/∂b
 	}
 
-	gradients := map[string]*Value{
+	gradients := map[string]*nn.Value{
 		"x1": x1,
 		"w1": w1,
 		"x2": x2,
@@ -170,8 +172,8 @@ func TestSimplifiedGrad(t *testing.T) {
 }
 
 func TestGradSameComponent(t *testing.T) {
-	a := &Value{Data: 2.0, Grad: 0.0, Label: "a"}
-	b := Add(a, a)
+	a := &nn.Value{Data: 2.0, Grad: 0.0, Label: "a"}
+	b := nn.Add(a, a)
 	b.Print()
 
 	b.Grad = 1.0
@@ -184,7 +186,7 @@ func TestGradSameComponent(t *testing.T) {
 }
 
 func TestNeuron(t *testing.T) {
-	neuron := NewNeuron(2)
+	neuron := nn.NewNeuron(2)
 	neuron.Print()
 	if len(neuron.W) != 2 {
 		t.Errorf("Expected 2 weights, got %d", len(neuron.W))
